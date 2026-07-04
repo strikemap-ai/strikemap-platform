@@ -6,6 +6,7 @@ import triggerRouter from './routes/trigger.js';
 import digestRouter from './routes/digest.js';
 import adminRouter from './routes/admin.js';
 import approveRouter from './routes/approve.js';
+import rejectRouter from './routes/reject.js';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/api/trigger', triggerRouter);
 app.use('/api/digest', digestRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/approve', approveRouter);
+app.use('/api/reject', rejectRouter);
 
 const PORT = process.env.PORT || 3000;
 
