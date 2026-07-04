@@ -1,11 +1,59 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  InternalServerError,
+  RateLimitError,
+} from '@anthropic-ai/sdk';
 import { supabase } from '../db/client.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
+const MAX_CLAUDE_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 500;
+
 export class NoApprovedPromptError extends Error {}
+
+function isRetryableClaudeError(err) {
+  return (
+    err instanceof APIConnectionError ||
+    err instanceof APIConnectionTimeoutError ||
+    err instanceof InternalServerError ||
+    err instanceof RateLimitError ||
+    (typeof err?.status === 'number' && (err.status === 429 || err.status >= 500))
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callClaudeWithRetry(params, context) {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await anthropic.messages.create(params);
+    } catch (err) {
+      if (!isRetryableClaudeError(err) || attempt >= MAX_CLAUDE_RETRIES) {
+        throw err;
+      }
+
+      const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
+      console.error('Claude API call failed, retrying', {
+        ...context,
+        attempt: attempt + 1,
+        max_attempts: MAX_CLAUDE_RETRIES + 1,
+        delay_ms: delay,
+        error: err.message,
+      });
+
+      await sleep(delay);
+      attempt += 1;
+    }
+  }
+}
 
 const OUTPUT_INSTRUCTIONS = `
 You must respond with a single JSON object only - no markdown, no commentary, no code fences - containing exactly these fields:
@@ -87,12 +135,15 @@ export async function runPromptEngine(client, account) {
   try {
     console.log('Calling Claude API', { client_id: client.id, account_id: account.id });
 
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      system: promptRow.prompt_text,
-      messages: [{ role: 'user', content: userMessage }],
-    });
+    const response = await callClaudeWithRetry(
+      {
+        model: CLAUDE_MODEL,
+        max_tokens: 4096,
+        system: promptRow.prompt_text,
+        messages: [{ role: 'user', content: userMessage }],
+      },
+      { client_id: client.id, account_id: account.id }
+    );
 
     const rawText = response.content
       .filter((block) => block.type === 'text')
