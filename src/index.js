@@ -7,6 +7,7 @@ import digestRouter from './routes/digest.js';
 import adminRouter from './routes/admin.js';
 import approveRouter from './routes/approve.js';
 import rejectRouter from './routes/reject.js';
+import pipelineRouter from './routes/pipeline.js';
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/digest', digestRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/approve', approveRouter);
 app.use('/api/reject', rejectRouter);
+app.use('/api/pipeline', pipelineRouter);
 
 const PORT = process.env.PORT || 3000;
 
