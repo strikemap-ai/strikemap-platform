@@ -54,6 +54,89 @@ async function addLeadToCampaign(payload) {
   return responseBody;
 }
 
+async function deleteLead(leadId) {
+  const res = await fetch(`${INSTANTLY_API_BASE}/leads/${leadId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` },
+  });
+
+  const responseBody = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const message = responseBody?.message || res.statusText;
+    const error = new Error(`Instantly API error (${res.status}): ${message}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return responseBody;
+}
+
+// Instantly has no per-lead "pause" action - the lead's status field is read-only, and the
+// only pause endpoints pause an entire campaign, subsequence, or sending account. Removing
+// the lead outright is the only way to guarantee no further sequence emails go out to them.
+export async function stopInstantlySequence(asset) {
+  if (!asset.instantly_contact_id) {
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'instantly',
+      action: 'stop_sequence',
+      outcome: 'skipped',
+      error_message: 'No Instantly lead associated with this asset',
+    });
+    return;
+  }
+
+  try {
+    if (isDryRun()) {
+      console.log('[DRY RUN] Would remove Instantly lead from campaign:', {
+        asset_id: asset.id,
+        endpoint: `DELETE /api/v2/leads/${asset.instantly_contact_id}`,
+      });
+
+      await logOutreachAction({
+        client_id: asset.client_id,
+        asset_id: asset.id,
+        account_id: asset.account_id,
+        channel: 'instantly',
+        action: 'stop_sequence',
+        outcome: 'dry_run',
+      });
+
+      return;
+    }
+
+    await deleteLead(asset.instantly_contact_id);
+
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'instantly',
+      action: 'stop_sequence',
+      outcome: 'success',
+    });
+  } catch (err) {
+    console.error('Failed to remove Instantly lead from campaign:', {
+      asset_id: asset.id,
+      lead_id: asset.instantly_contact_id,
+      error: err.message,
+    });
+
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'instantly',
+      action: 'stop_sequence',
+      outcome: 'error',
+      error_message: err.message,
+    });
+  }
+}
+
 export async function runInstantlyChannel(asset, account) {
   try {
     if (!account.primary_email) {

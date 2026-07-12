@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { supabase } from '../../db/client.js';
 import { markAssetReplied } from '../../services/replyHandling.js';
+import { stopInstantlySequence } from '../../services/instantlyService.js';
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.post('/', async (req, res) => {
 
     const { data: asset, error } = await supabase
       .from('assets')
-      .select('id, client_id, account_id, hubspot_deal_id')
+      .select('id, client_id, account_id, hubspot_deal_id, instantly_contact_id')
       .eq('connectsafely_profile_urn', senderUrn)
       .eq('sequence_status', 'approved')
       .is('replied_at', null)
@@ -65,6 +66,9 @@ router.post('/', async (req, res) => {
     }
 
     await markAssetReplied(asset, 'linkedin');
+    // They replied on LinkedIn - stop the parallel Instantly email sequence so it doesn't
+    // keep emailing someone who already responded through a different channel.
+    await stopInstantlySequence(asset);
 
     return res.status(200).json({ status: 'recorded', asset_id: asset.id });
   } catch (err) {
