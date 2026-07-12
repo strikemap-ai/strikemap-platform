@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from '../services/outreachLog.js';
+import { executeOutreachChannels } from '../services/outreachExecution.js';
 
 const router = Router();
 
@@ -23,7 +24,21 @@ router.post('/:assetId', async (req, res) => {
   try {
     const { data: existing, error: fetchError } = await supabase
       .from('assets')
-      .select('id, client_id, account_id')
+      .select(
+        `
+        id,
+        client_id,
+        account_id,
+        accounts (
+          company_name,
+          primary_first_name,
+          primary_last_name,
+          primary_email,
+          primary_title,
+          primary_linkedin
+        )
+      `
+      )
       .eq('id', assetId)
       .single();
 
@@ -61,6 +76,8 @@ router.post('/:assetId', async (req, res) => {
       action: 'approve',
       outcome: 'success',
     });
+
+    await executeOutreachChannels(asset, existing.accounts || {});
 
     return res.status(200).json({ asset });
   } catch (err) {

@@ -8,6 +8,8 @@ import adminRouter from './routes/admin.js';
 import approveRouter from './routes/approve.js';
 import rejectRouter from './routes/reject.js';
 import pipelineRouter from './routes/pipeline.js';
+import linkedinAcceptedRouter from './routes/linkedinAccepted.js';
+import { startLinkedInAcceptancePolling } from './jobs/linkedinAcceptancePoller.js';
 
 const app = express();
 
@@ -23,9 +25,12 @@ app.use('/api/admin', adminRouter);
 app.use('/api/approve', approveRouter);
 app.use('/api/reject', rejectRouter);
 app.use('/api/pipeline', pipelineRouter);
+app.use('/api/linkedin/accepted', linkedinAcceptedRouter);
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Strikemap Platform server listening on port ${PORT}`);
 });
+
+startLinkedInAcceptancePolling();
