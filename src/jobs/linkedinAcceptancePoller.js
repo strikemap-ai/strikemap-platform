@@ -3,6 +3,7 @@ import {
   extractProfileSlug,
   checkRelationshipStatus,
   handleConnectionAccepted,
+  backfillProfileUrn,
 } from '../services/connectSafelyService.js';
 
 const POLL_INTERVAL_MS = Number(process.env.LINKEDIN_POLL_INTERVAL_MINUTES || 30) * 60 * 1000;
@@ -39,6 +40,10 @@ export async function pollPendingConnections() {
 
     try {
       const relationship = await checkRelationshipStatus(profileId);
+
+      // Backfills the URN for in-flight assets that were sent before this column existed,
+      // not just ones connected through the current code.
+      await backfillProfileUrn(asset.id, relationship.profileUrn);
 
       if (relationship.status === 'CONNECTED') {
         await handleConnectionAccepted(asset, asset.accounts || {});

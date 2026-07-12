@@ -65,6 +65,14 @@ export async function checkRelationshipStatus(profileId) {
   return { ...body, rateLimitRemaining: rateLimitRemaining !== null ? Number(rateLimitRemaining) : null };
 }
 
+export async function backfillProfileUrn(assetId, profileUrn) {
+  if (!profileUrn) {
+    return;
+  }
+
+  await supabase.from('assets').update({ connectsafely_profile_urn: profileUrn }).eq('id', assetId);
+}
+
 export async function recordConnectionAccepted(asset) {
   await supabase
     .from('assets')
@@ -217,11 +225,14 @@ export async function runConnectSafelyChannel(asset, account) {
     }
 
     try {
-      await sendConnectionRequest(payload);
+      const result = await sendConnectionRequest(payload);
 
       await supabase
         .from('assets')
-        .update({ linkedin_connection_sent_at: new Date().toISOString() })
+        .update({
+          linkedin_connection_sent_at: new Date().toISOString(),
+          connectsafely_profile_urn: result?.profileUrn || null,
+        })
         .eq('id', asset.id);
 
       await logOutreachAction({

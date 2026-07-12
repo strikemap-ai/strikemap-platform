@@ -127,6 +127,73 @@ async function logNoteActivity({ contactId, dealId, body }) {
   });
 }
 
+export async function moveDealToStage(asset, stageLabel) {
+  if (!asset.hubspot_deal_id) {
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'hubspot',
+      action: 'stage_update',
+      outcome: 'skipped',
+      error_message: 'No HubSpot deal associated with this asset',
+    });
+    return;
+  }
+
+  try {
+    if (isDryRun()) {
+      console.log('[DRY RUN] Would move HubSpot deal to stage:', {
+        asset_id: asset.id,
+        deal_id: asset.hubspot_deal_id,
+        stageLabel,
+      });
+
+      await logOutreachAction({
+        client_id: asset.client_id,
+        asset_id: asset.id,
+        account_id: asset.account_id,
+        channel: 'hubspot',
+        action: 'stage_update',
+        outcome: 'dry_run',
+      });
+
+      return;
+    }
+
+    const stageId = await getStageId(stageLabel);
+
+    await hubspotRequest('PATCH', `/crm/v3/objects/deals/${asset.hubspot_deal_id}`, {
+      properties: { dealstage: stageId },
+    });
+
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'hubspot',
+      action: 'stage_update',
+      outcome: 'success',
+    });
+  } catch (err) {
+    console.error('HubSpot deal stage update failed:', {
+      asset_id: asset.id,
+      deal_id: asset.hubspot_deal_id,
+      error: err.message,
+    });
+
+    await logOutreachAction({
+      client_id: asset.client_id,
+      asset_id: asset.id,
+      account_id: asset.account_id,
+      channel: 'hubspot',
+      action: 'stage_update',
+      outcome: 'error',
+      error_message: err.message,
+    });
+  }
+}
+
 export async function runHubSpotChannel(asset, account) {
   const primaryName = [account.primary_first_name, account.primary_last_name]
     .filter(Boolean)
