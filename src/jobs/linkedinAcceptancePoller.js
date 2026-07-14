@@ -31,6 +31,19 @@ export async function pollPendingConnections() {
 
   console.log(`Polling ConnectSafely for ${pending.length} pending LinkedIn connection(s)`);
 
+  const clientIds = [...new Set(pending.map((asset) => asset.client_id))];
+  const { data: clients, error: clientsError } = await supabase
+    .from('clients')
+    .select('*')
+    .in('id', clientIds);
+
+  if (clientsError) {
+    console.error('LinkedIn acceptance poll failed to load clients:', clientsError.message);
+    return;
+  }
+
+  const clientsById = new Map((clients || []).map((client) => [client.id, client]));
+
   for (const asset of pending) {
     const profileId = extractProfileSlug(asset.accounts?.primary_linkedin);
 
@@ -38,15 +51,17 @@ export async function pollPendingConnections() {
       continue;
     }
 
+    const client = clientsById.get(asset.client_id);
+
     try {
-      const relationship = await checkRelationshipStatus(profileId);
+      const relationship = await checkRelationshipStatus(profileId, client);
 
       // Backfills the URN for in-flight assets that were sent before this column existed,
       // not just ones connected through the current code.
       await backfillProfileUrn(asset.id, relationship.profileUrn);
 
       if (relationship.status === 'CONNECTED') {
-        await handleConnectionAccepted(asset, asset.accounts || {});
+        await handleConnectionAccepted(asset, asset.accounts || {}, client);
         console.log('LinkedIn connection accepted:', { asset_id: asset.id, profileId });
       }
 

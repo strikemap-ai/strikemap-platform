@@ -56,7 +56,7 @@ router.post('/', async (req, res) => {
 
     const { data: existing, error: fetchError } = await supabase
       .from('assets')
-      .select('id, client_id, account_id, linkedin_dm, accounts (primary_linkedin)')
+      .select('id, client_id, account_id, linkedin_dm, accounts (primary_linkedin), clients (*)')
       .eq('id', assetId)
       .single();
 
@@ -64,7 +64,7 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    await handleConnectionAccepted(existing, existing.accounts || {});
+    await handleConnectionAccepted(existing, existing.accounts || {}, existing.clients);
 
     return res.status(200).json({ status: 'recorded', asset_id: existing.id });
   } catch (err) {

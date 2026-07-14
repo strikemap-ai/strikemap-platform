@@ -51,7 +51,7 @@ router.post('/', async (req, res) => {
 
     const { data: asset, error: assetError } = await supabase
       .from('assets')
-      .select('id, client_id, account_id, hubspot_deal_id')
+      .select('id, client_id, account_id, hubspot_deal_id, clients (*)')
       .eq('account_id', account.id)
       .eq('sequence_status', 'approved')
       .is('replied_at', null)
@@ -68,7 +68,7 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ status: 'no_matching_asset' });
     }
 
-    await markAssetReplied(asset, 'email');
+    await markAssetReplied(asset, 'email', asset.clients);
 
     return res.status(200).json({ status: 'recorded', asset_id: asset.id });
   } catch (err) {

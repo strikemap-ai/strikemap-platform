@@ -2,7 +2,7 @@ import { supabase } from '../db/client.js';
 import { logOutreachAction } from './outreachLog.js';
 import { moveDealToStage } from './hubspotService.js';
 
-export async function markAssetReplied(asset, channel) {
+export async function markAssetReplied(asset, channel, client) {
   await supabase
     .from('assets')
     .update({
@@ -21,5 +21,5 @@ export async function markAssetReplied(asset, channel) {
     outcome: 'success',
   });
 
-  await moveDealToStage(asset, 'Replied');
+  await moveDealToStage(asset, client, 'Replied');
 }

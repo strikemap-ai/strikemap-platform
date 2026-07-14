@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
 
     const { data: asset, error } = await supabase
       .from('assets')
-      .select('id, client_id, account_id, hubspot_deal_id, instantly_contact_id')
+      .select('id, client_id, account_id, hubspot_deal_id, instantly_contact_id, clients (*)')
       .eq('connectsafely_profile_urn', senderUrn)
       .eq('sequence_status', 'approved')
       .is('replied_at', null)
@@ -65,10 +65,10 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ status: 'no_matching_asset' });
     }
 
-    await markAssetReplied(asset, 'linkedin');
+    await markAssetReplied(asset, 'linkedin', asset.clients);
     // They replied on LinkedIn - stop the parallel Instantly email sequence so it doesn't
     // keep emailing someone who already responded through a different channel.
-    await stopInstantlySequence(asset);
+    await stopInstantlySequence(asset, asset.clients);
 
     return res.status(200).json({ status: 'recorded', asset_id: asset.id });
   } catch (err) {

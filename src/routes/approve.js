@@ -39,6 +39,15 @@ router.post('/:assetId', async (req, res) => {
           primary_email,
           primary_title,
           primary_linkedin
+        ),
+        clients (
+          id,
+          hubspot_access_token,
+          hubspot_pipeline_id,
+          instantly_api_key,
+          instantly_campaign_id,
+          connectsafely_api_key,
+          connectsafely_account_id
         )
       `
       )
@@ -84,7 +93,7 @@ router.post('/:assetId', async (req, res) => {
       outcome: 'success',
     });
 
-    await executeOutreachChannels(asset, existing.accounts || {});
+    await executeOutreachChannels(asset, existing.accounts || {}, existing.clients);
 
     return res.status(200).json({ asset });
   } catch (err) {

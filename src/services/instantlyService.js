@@ -1,25 +1,23 @@
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from './outreachLog.js';
 
-// TODO(multi-client): reads credentials from process.env instead of the per-client
-// `clients.instantly_api_key` / `instantly_campaign_id` columns. Must be refactored to accept
-// credentials per call before any second client (e.g. Pallet) goes live - as written this file
-// hard-blocks two clients with different Instantly accounts running in the same process.
-const { INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID } = process.env;
-
-if (!INSTANTLY_API_KEY || !INSTANTLY_CAMPAIGN_ID) {
-  throw new Error('INSTANTLY_API_KEY and INSTANTLY_CAMPAIGN_ID must be set in .env');
-}
-
 const INSTANTLY_API_BASE = 'https://api.instantly.ai/api/v2';
 
 function isDryRun() {
   return process.env.DRY_RUN === 'true';
 }
 
-function buildLeadPayload(asset, account) {
+function validateCredentials(client) {
+  if (!client?.instantly_api_key || !client?.instantly_campaign_id) {
+    throw new Error(`Instantly credentials not configured for client ${client?.id || 'unknown'}`);
+  }
+
+  return { apiKey: client.instantly_api_key, campaignId: client.instantly_campaign_id };
+}
+
+function buildLeadPayload(asset, account, campaignId) {
   return {
-    campaign: INSTANTLY_CAMPAIGN_ID,
+    campaign: campaignId,
     email: account.primary_email,
     first_name: account.primary_first_name || undefined,
     last_name: account.primary_last_name || undefined,
@@ -36,11 +34,11 @@ function buildLeadPayload(asset, account) {
   };
 }
 
-async function addLeadToCampaign(payload) {
+async function addLeadToCampaign(payload, apiKey) {
   const res = await fetch(`${INSTANTLY_API_BASE}/leads`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${INSTANTLY_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -58,10 +56,10 @@ async function addLeadToCampaign(payload) {
   return responseBody;
 }
 
-async function deleteLead(leadId) {
+async function deleteLead(leadId, apiKey) {
   const res = await fetch(`${INSTANTLY_API_BASE}/leads/${leadId}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
   });
 
   const responseBody = await res.json().catch(() => null);
@@ -79,7 +77,7 @@ async function deleteLead(leadId) {
 // Instantly has no per-lead "pause" action - the lead's status field is read-only, and the
 // only pause endpoints pause an entire campaign, subsequence, or sending account. Removing
 // the lead outright is the only way to guarantee no further sequence emails go out to them.
-export async function stopInstantlySequence(asset) {
+export async function stopInstantlySequence(asset, client) {
   if (!asset.instantly_contact_id) {
     await logOutreachAction({
       client_id: asset.client_id,
@@ -112,7 +110,8 @@ export async function stopInstantlySequence(asset) {
       return;
     }
 
-    await deleteLead(asset.instantly_contact_id);
+    const credentials = validateCredentials(client);
+    await deleteLead(asset.instantly_contact_id, credentials.apiKey);
 
     await logOutreachAction({
       client_id: asset.client_id,
@@ -141,13 +140,13 @@ export async function stopInstantlySequence(asset) {
   }
 }
 
-export async function runInstantlyChannel(asset, account) {
+export async function runInstantlyChannel(asset, account, client) {
   try {
     if (!account.primary_email) {
       throw new Error('Cannot enroll Instantly lead without an email address');
     }
 
-    const payload = buildLeadPayload(asset, account);
+    const payload = buildLeadPayload(asset, account, client?.instantly_campaign_id);
 
     if (isDryRun()) {
       console.log('[DRY RUN] Would enroll Instantly lead:', {
@@ -168,7 +167,8 @@ export async function runInstantlyChannel(asset, account) {
       return;
     }
 
-    const result = await addLeadToCampaign(payload);
+    const credentials = validateCredentials(client);
+    const result = await addLeadToCampaign(payload, credentials.apiKey);
 
     if (result?.id) {
       await supabase.from('assets').update({ instantly_contact_id: result.id }).eq('id', asset.id);

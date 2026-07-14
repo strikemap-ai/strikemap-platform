@@ -1,20 +1,18 @@
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from './outreachLog.js';
 
-// TODO(multi-client): reads credentials from process.env instead of the per-client
-// `clients.connectsafely_api_key` / `connectsafely_account_id` columns. Must be refactored to
-// accept credentials per call before any second client (e.g. Pallet) goes live - as written this
-// file hard-blocks two clients with different ConnectSafely accounts running in the same process.
-const { CONNECTSAFELY_API_KEY, CONNECTSAFELY_ACCOUNT_ID } = process.env;
-
-if (!CONNECTSAFELY_API_KEY || !CONNECTSAFELY_ACCOUNT_ID) {
-  throw new Error('CONNECTSAFELY_API_KEY and CONNECTSAFELY_ACCOUNT_ID must be set in .env');
-}
-
 const CONNECTSAFELY_API_BASE = 'https://api.connectsafely.ai/linkedin';
 
 function isDryRun() {
   return process.env.DRY_RUN === 'true';
+}
+
+function validateCredentials(client) {
+  if (!client?.connectsafely_api_key || !client?.connectsafely_account_id) {
+    throw new Error(`ConnectSafely credentials not configured for client ${client?.id || 'unknown'}`);
+  }
+
+  return { apiKey: client.connectsafely_api_key, accountId: client.connectsafely_account_id };
 }
 
 // /connect and /relationship/{accountId}/{profileId} both take the LinkedIn vanity slug, not the full URL.
@@ -23,11 +21,11 @@ export function extractProfileSlug(linkedinUrl) {
   return match ? match[1] : null;
 }
 
-async function sendConnectionRequest(payload) {
+async function sendConnectionRequest(payload, credentials) {
   const res = await fetch(`${CONNECTSAFELY_API_BASE}/connect`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${CONNECTSAFELY_API_KEY}`,
+      Authorization: `Bearer ${credentials.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -50,10 +48,12 @@ async function sendConnectionRequest(payload) {
 // The X-RateLimit-* headers ConnectSafely documents are attached to POST /connect (the
 // action that consumes the 90/week quota) - empirically this GET does not return them, but
 // we still read defensively in case that changes.
-export async function checkRelationshipStatus(profileId) {
+export async function checkRelationshipStatus(profileId, client) {
+  const credentials = validateCredentials(client);
+
   const res = await fetch(
-    `${CONNECTSAFELY_API_BASE}/relationship/${CONNECTSAFELY_ACCOUNT_ID}/${encodeURIComponent(profileId)}`,
-    { headers: { Authorization: `Bearer ${CONNECTSAFELY_API_KEY}` } }
+    `${CONNECTSAFELY_API_BASE}/relationship/${credentials.accountId}/${encodeURIComponent(profileId)}`,
+    { headers: { Authorization: `Bearer ${credentials.apiKey}` } }
   );
 
   const rateLimitRemaining = res.headers.get('x-ratelimit-remaining');
@@ -93,11 +93,11 @@ export async function recordConnectionAccepted(asset) {
   });
 }
 
-async function sendConversationMessage(payload) {
+async function sendConversationMessage(payload, credentials) {
   const res = await fetch(`${CONNECTSAFELY_API_BASE}/conversations/send`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${CONNECTSAFELY_API_KEY}`,
+      Authorization: `Bearer ${credentials.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -115,7 +115,7 @@ async function sendConversationMessage(payload) {
   return responseBody;
 }
 
-export async function runConnectSafelyDmChannel(asset, account) {
+export async function runConnectSafelyDmChannel(asset, account, client) {
   try {
     const profileId = extractProfileSlug(account.primary_linkedin);
 
@@ -128,7 +128,7 @@ export async function runConnectSafelyDmChannel(asset, account) {
     }
 
     const payload = {
-      accountId: CONNECTSAFELY_ACCOUNT_ID,
+      accountId: client?.connectsafely_account_id,
       recipientProfileId: profileId,
       message: asset.linkedin_dm,
       messagingChannel: 'auto',
@@ -153,7 +153,8 @@ export async function runConnectSafelyDmChannel(asset, account) {
       return;
     }
 
-    await sendConversationMessage(payload);
+    const credentials = validateCredentials(client);
+    await sendConversationMessage(payload, credentials);
 
     await supabase
       .from('assets')
@@ -186,12 +187,12 @@ export async function runConnectSafelyDmChannel(asset, account) {
   }
 }
 
-export async function handleConnectionAccepted(asset, account) {
+export async function handleConnectionAccepted(asset, account, client) {
   await recordConnectionAccepted(asset);
-  await runConnectSafelyDmChannel(asset, account);
+  await runConnectSafelyDmChannel(asset, account, client);
 }
 
-export async function runConnectSafelyChannel(asset, account) {
+export async function runConnectSafelyChannel(asset, account, client) {
   try {
     const profileId = extractProfileSlug(account.primary_linkedin);
 
@@ -204,7 +205,7 @@ export async function runConnectSafelyChannel(asset, account) {
     }
 
     const payload = {
-      accountId: CONNECTSAFELY_ACCOUNT_ID,
+      accountId: client?.connectsafely_account_id,
       profileId,
       customMessage: asset.linkedin_request,
     };
@@ -228,8 +229,10 @@ export async function runConnectSafelyChannel(asset, account) {
       return;
     }
 
+    const credentials = validateCredentials(client);
+
     try {
-      const result = await sendConnectionRequest(payload);
+      const result = await sendConnectionRequest(payload, credentials);
 
       await supabase
         .from('assets')
