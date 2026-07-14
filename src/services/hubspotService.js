@@ -1,6 +1,10 @@
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from './outreachLog.js';
 
+// TODO(multi-client): reads credentials from process.env instead of the per-client
+// `clients.hubspot_access_token` / `hubspot_pipeline_id` columns. Must be refactored to accept
+// credentials per call before any second client (e.g. Pallet) goes live - as written this file
+// hard-blocks two clients with different HubSpot accounts running in the same process.
 const { HUBSPOT_ACCESS_TOKEN, HUBSPOT_PIPELINE_ID } = process.env;
 
 if (!HUBSPOT_ACCESS_TOKEN || !HUBSPOT_PIPELINE_ID) {

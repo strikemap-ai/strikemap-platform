@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from '../services/outreachLog.js';
+import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
+
+router.use(requireAuth);
 
 router.post('/:assetId', async (req, res) => {
   const { assetId } = req.params;
@@ -17,6 +20,10 @@ router.post('/:assetId', async (req, res) => {
 
     if (fetchError || !existing) {
       return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    if (!(await requireClientAccess(req.user.id, existing.client_id))) {
+      return res.status(403).json({ error: 'You do not have access to this client' });
     }
 
     const updates = {

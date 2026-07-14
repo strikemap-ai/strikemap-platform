@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
+import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
+
+router.use(requireAuth);
 
 router.get('/:clientId', async (req, res) => {
   const { clientId } = req.params;
@@ -15,6 +18,10 @@ router.get('/:clientId', async (req, res) => {
 
     if (clientError || !client) {
       return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!(await requireClientAccess(req.user.id, clientId))) {
+      return res.status(403).json({ error: 'You do not have access to this client' });
     }
 
     const { data: assets, error: assetsError } = await supabase

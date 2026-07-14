@@ -1,6 +1,10 @@
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from './outreachLog.js';
 
+// TODO(multi-client): reads credentials from process.env instead of the per-client
+// `clients.instantly_api_key` / `instantly_campaign_id` columns. Must be refactored to accept
+// credentials per call before any second client (e.g. Pallet) goes live - as written this file
+// hard-blocks two clients with different Instantly accounts running in the same process.
 const { INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID } = process.env;
 
 if (!INSTANTLY_API_KEY || !INSTANTLY_CAMPAIGN_ID) {
