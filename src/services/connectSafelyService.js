@@ -45,9 +45,10 @@ async function sendConnectionRequest(payload, credentials) {
   return responseBody;
 }
 
-// The X-RateLimit-* headers ConnectSafely documents are attached to POST /connect (the
-// action that consumes the 90/week quota) - empirically this GET does not return them, but
-// we still read defensively in case that changes.
+// The X-RateLimit-* headers ConnectSafely documents are attached to POST /connect (the action
+// that consumes the weekly connection-invite quota - read dynamically from X-RateLimit-Remaining,
+// not hardcoded, since the actual limit varies by account type, e.g. Sales Navigator vs standard)
+// - empirically this GET does not return them, but we still read defensively in case that changes.
 export async function checkRelationshipStatus(profileId, client) {
   const credentials = validateCredentials(client);
 
