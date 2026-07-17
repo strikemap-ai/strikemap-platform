@@ -3,6 +3,7 @@ import { supabase } from '../db/client.js';
 import { validateWebhook } from '../middleware/validateWebhook.js';
 import { runPromptEngine, NoApprovedPromptError } from '../services/promptEngine.js';
 import { sendDigestNotification } from '../services/notificationService.js';
+import { resolveRepId } from '../services/repAssignment.js';
 
 const router = Router();
 
@@ -30,7 +31,7 @@ router.post('/', validateWebhook, async (req, res) => {
   try {
     const { data: client, error: clientError } = await supabase
       .from('clients')
-      .select('id, ae_email, ae_name')
+      .select('id, ae_email, ae_name, hubspot_access_token, hubspot_pipeline_id')
       .eq('id', client_id)
       .single();
 
@@ -41,6 +42,11 @@ router.post('/', validateWebhook, async (req, res) => {
     if (additional_contacts !== undefined && !Array.isArray(additional_contacts)) {
       return res.status(400).json({ error: 'additional_contacts must be a valid JSON array' });
     }
+
+    const rep_id = await resolveRepId(client, {
+      companyWebsite: company_website,
+      primaryEmail: primary_email,
+    });
 
     const { data: account, error: accountError } = await supabase
       .from('accounts')
@@ -63,6 +69,7 @@ router.post('/', validateWebhook, async (req, res) => {
         primary_title,
         additional_contacts: additional_contacts || [],
         raw_payload: req.body,
+        rep_id,
       })
       .select()
       .single();

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from '../services/outreachLog.js';
-import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
+import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
 
@@ -14,7 +14,7 @@ router.post('/:assetId', async (req, res) => {
   try {
     const { data: existing, error: fetchError } = await supabase
       .from('assets')
-      .select('id, client_id, account_id')
+      .select('id, client_id, account_id, accounts (rep_id)')
       .eq('id', assetId)
       .single();
 
@@ -22,9 +22,21 @@ router.post('/:assetId', async (req, res) => {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    if (!(await requireClientAccess(req.user.id, existing.client_id))) {
+    const access = await getUserAccess(req.user.id, existing.client_id);
+
+    if (!access) {
       return res.status(403).json({ error: 'You do not have access to this client' });
     }
+
+    const isAdmin = access.role === 'admin';
+    const accountRepId = existing.accounts?.rep_id ?? null;
+    const isOwnAccount = accountRepId !== null && accountRepId === access.repId;
+
+    if (!isAdmin && !isOwnAccount) {
+      return res.status(403).json({ error: 'This account is not assigned to you' });
+    }
+
+    const adminOverride = isAdmin && !isOwnAccount;
 
     const updates = {
       sequence_status: 'rejected',
@@ -53,6 +65,9 @@ router.post('/:assetId', async (req, res) => {
       channel: 'dashboard',
       action: 'reject',
       outcome: 'success',
+      performed_by_user_id: req.user.id,
+      admin_override: adminOverride,
+      target_rep_id: accountRepId,
     });
 
     return res.status(200).json({ asset });

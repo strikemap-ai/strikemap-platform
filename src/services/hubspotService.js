@@ -15,6 +15,85 @@ function validateCredentials(client) {
   return { accessToken: client.hubspot_access_token, pipelineId: client.hubspot_pipeline_id };
 }
 
+async function searchCompanyOwnerByDomain(domain, credentials) {
+  const result = await hubspotRequest(
+    'POST',
+    '/crm/v3/objects/companies/search',
+    {
+      filterGroups: [{ filters: [{ propertyName: 'domain', operator: 'EQ', value: domain }] }],
+      properties: ['hubspot_owner_id'],
+      limit: 1,
+    },
+    credentials.accessToken
+  );
+
+  return result.results?.[0]?.properties?.hubspot_owner_id || null;
+}
+
+async function searchContactOwnerByEmail(email, credentials) {
+  const result = await hubspotRequest(
+    'POST',
+    '/crm/v3/objects/contacts/search',
+    {
+      filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: email }] }],
+      properties: ['hubspot_owner_id'],
+      limit: 1,
+    },
+    credentials.accessToken
+  );
+
+  return result.results?.[0]?.properties?.hubspot_owner_id || null;
+}
+
+// Company-first (by domain), falling back to contact (by email). Never throws - rep assignment
+// at trigger time must fail gracefully into "unassigned" rather than blocking account creation,
+// whether that's missing credentials, no match, or a HubSpot API error. Each search step is
+// independently caught - a company-search failure (missing scopes, API error, etc.) must not
+// prevent the contact-search fallback from running.
+export async function findOwnerId(client, { domain, email }) {
+  let credentials;
+
+  try {
+    credentials = validateCredentials(client);
+  } catch (err) {
+    console.warn('HubSpot owner lookup skipped, leaving account unassigned:', {
+      client_id: client?.id,
+      error: err.message,
+    });
+    return null;
+  }
+
+  if (domain) {
+    try {
+      const ownerId = await searchCompanyOwnerByDomain(domain, credentials);
+      if (ownerId) {
+        return ownerId;
+      }
+    } catch (err) {
+      console.warn('HubSpot company lookup failed, falling back to contact lookup:', {
+        client_id: client?.id,
+        error: err.message,
+      });
+    }
+  }
+
+  if (email) {
+    try {
+      const ownerId = await searchContactOwnerByEmail(email, credentials);
+      if (ownerId) {
+        return ownerId;
+      }
+    } catch (err) {
+      console.warn('HubSpot contact lookup failed, leaving account unassigned:', {
+        client_id: client?.id,
+        error: err.message,
+      });
+    }
+  }
+
+  return null;
+}
+
 // Confirmed against the live account via GET /crm/v4/associations/{from}/{to}/labels
 const ASSOCIATION_TYPE_ID = {
   DEAL_TO_CONTACT: 3,

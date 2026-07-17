@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
-import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
+import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
 
@@ -52,11 +52,15 @@ router.get('/:clientId', async (req, res) => {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (!(await requireClientAccess(req.user.id, clientId))) {
+    const access = await getUserAccess(req.user.id, clientId);
+
+    if (!access) {
       return res.status(403).json({ error: 'You do not have access to this client' });
     }
 
-    const { data: assets, error: assetsError } = await supabase
+    const isAdmin = access.role === 'admin';
+
+    let query = supabase
       .from('assets')
       .select(
         `
@@ -71,18 +75,28 @@ router.get('/:clientId', async (req, res) => {
         linkedin_connection_accepted_at,
         linkedin_dm_sent_at,
         email_step_1_sent_at,
-        accounts (
+        accounts!inner (
           id,
           company_name,
           trigger_type,
           trigger_date,
           primary_first_name,
-          primary_last_name
+          primary_last_name,
+          rep_id,
+          reps ( name )
         )
       `
       )
       .eq('client_id', clientId)
       .order('created_at', { ascending: false });
+
+    // Admin sees every rep's assigned accounts combined, but unassigned accounts stay carved
+    // out - those are only visible through the dedicated /api/admin/unassigned endpoint.
+    query = isAdmin
+      ? query.not('accounts.rep_id', 'is', null)
+      : query.eq('accounts.rep_id', access.repId);
+
+    const { data: assets, error: assetsError } = await query;
 
     if (assetsError) {
       throw assetsError;
@@ -120,6 +134,7 @@ router.get('/:clientId', async (req, res) => {
         trigger_type: account.trigger_type,
         sequence_status: asset.sequence_status,
         days_since_last_activity: daysSince(lastActivityAt(asset, account)),
+        ...(isAdmin ? { assigned_rep: account.reps?.name || null } : {}),
       });
     }
 

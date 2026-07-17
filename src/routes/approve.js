@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from '../services/outreachLog.js';
 import { executeOutreachChannels } from '../services/outreachExecution.js';
-import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
+import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
 
@@ -38,7 +38,8 @@ router.post('/:assetId', async (req, res) => {
           primary_last_name,
           primary_email,
           primary_title,
-          primary_linkedin
+          primary_linkedin,
+          rep_id
         ),
         clients (
           id,
@@ -58,9 +59,21 @@ router.post('/:assetId', async (req, res) => {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    if (!(await requireClientAccess(req.user.id, existing.client_id))) {
+    const access = await getUserAccess(req.user.id, existing.client_id);
+
+    if (!access) {
       return res.status(403).json({ error: 'You do not have access to this client' });
     }
+
+    const isAdmin = access.role === 'admin';
+    const accountRepId = existing.accounts?.rep_id ?? null;
+    const isOwnAccount = accountRepId !== null && accountRepId === access.repId;
+
+    if (!isAdmin && !isOwnAccount) {
+      return res.status(403).json({ error: 'This account is not assigned to you' });
+    }
+
+    const adminOverride = isAdmin && !isOwnAccount;
 
     const edits = {};
     for (const field of EDITABLE_ASSET_FIELDS) {
@@ -91,6 +104,9 @@ router.post('/:assetId', async (req, res) => {
       channel: 'dashboard',
       action: 'approve',
       outcome: 'success',
+      performed_by_user_id: req.user.id,
+      admin_override: adminOverride,
+      target_rep_id: accountRepId,
     });
 
     await executeOutreachChannels(asset, existing.accounts || {}, existing.clients);

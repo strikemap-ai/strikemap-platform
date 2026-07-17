@@ -33,27 +33,46 @@ function buildDigestHtml(accounts) {
   `.trim();
 }
 
+// One digest per active rep, filtered to their own assigned accounts. Unassigned accounts are
+// never included here - they only surface through the admin unassigned-queue endpoint.
 export async function sendDigestNotification(client) {
-  const { data: assets, error } = await supabase
-    .from('assets')
-    .select('accounts(company_name, trigger_score)')
+  const { data: reps, error: repsError } = await supabase
+    .from('reps')
+    .select('id, name, email')
     .eq('client_id', client.id)
-    .eq('sequence_status', 'pending_ae_review');
+    .eq('status', 'active');
 
-  if (error) {
-    throw error;
+  if (repsError) {
+    throw repsError;
   }
 
-  const accounts = (assets || []).map((row) => row.accounts).filter(Boolean);
+  for (const rep of reps || []) {
+    const { data: assets, error } = await supabase
+      .from('assets')
+      .select('accounts!inner(company_name, trigger_score, rep_id)')
+      .eq('client_id', client.id)
+      .eq('sequence_status', 'pending_ae_review')
+      .eq('accounts.rep_id', rep.id);
 
-  if (accounts.length === 0) {
-    return;
+    if (error) {
+      console.error('Failed to load pending accounts for rep digest:', {
+        rep_id: rep.id,
+        error: error.message,
+      });
+      continue;
+    }
+
+    const accounts = (assets || []).map((row) => row.accounts).filter(Boolean);
+
+    if (accounts.length === 0) {
+      continue;
+    }
+
+    await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL,
+      to: rep.email,
+      subject: 'Strikemap Digest - new accounts ready',
+      html: buildDigestHtml(accounts),
+    });
   }
-
-  await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL,
-    to: client.ae_email,
-    subject: 'Strikemap Digest - new accounts ready',
-    html: buildDigestHtml(accounts),
-  });
 }

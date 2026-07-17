@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
-import { requireAuth, requireClientAccess } from '../middleware/requireAuth.js';
+import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
 
@@ -20,11 +20,15 @@ router.get('/:clientId', async (req, res) => {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (!(await requireClientAccess(req.user.id, clientId))) {
+    const access = await getUserAccess(req.user.id, clientId);
+
+    if (!access) {
       return res.status(403).json({ error: 'You do not have access to this client' });
     }
 
-    const { data: assets, error: assetsError } = await supabase
+    const isAdmin = access.role === 'admin';
+
+    let query = supabase
       .from('assets')
       .select(
         `
@@ -42,7 +46,7 @@ router.get('/:clientId', async (req, res) => {
         email_step_3,
         sequence_status,
         created_at,
-        accounts (
+        accounts!inner (
           trigger_score,
           trigger_type,
           company_name,
@@ -51,13 +55,21 @@ router.get('/:clientId', async (req, res) => {
           primary_title,
           primary_email,
           primary_linkedin,
-          primary_direct_dial
+          primary_direct_dial,
+          rep_id,
+          reps ( name )
         )
       `
       )
       .eq('client_id', clientId)
       .eq('sequence_status', 'pending_ae_review')
       .order('trigger_score', { foreignTable: 'accounts', ascending: false });
+
+    query = isAdmin
+      ? query.not('accounts.rep_id', 'is', null)
+      : query.eq('accounts.rep_id', access.repId);
+
+    const { data: assets, error: assetsError } = await query;
 
     if (assetsError) {
       throw assetsError;
@@ -92,6 +104,7 @@ router.get('/:clientId', async (req, res) => {
         email_step_3: asset.email_step_3,
         sequence_status: asset.sequence_status,
         created_at: asset.created_at,
+        ...(isAdmin ? { assigned_rep: account.reps?.name || null } : {}),
       };
     });
 
