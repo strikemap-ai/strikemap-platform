@@ -74,6 +74,21 @@ You must respond with a single JSON object only - no markdown, no commentary, no
 Email steps must be written as a sequence. Step 1 is the first cold outreach. Step 2 is a follow-up assuming no reply to Step 1 - softer and shorter. Step 3 is a final gentle close assuming no reply to Steps 1 or 2 - one sentence. Write all three steps together with this context in mind.
 `.trim();
 
+function formatAdditionalContacts(contacts) {
+  if (!Array.isArray(contacts) || contacts.length === 0) {
+    return 'None provided.';
+  }
+
+  return contacts
+    .map((c) => {
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed';
+      const priority = c.priority ? ` | Priority: ${c.priority}` : '';
+      const channel = c.channel ? ` | Preferred channel: ${c.channel}` : '';
+      return `- ${name} - ${c.title || 'N/A'}${priority}${channel}`;
+    })
+    .join('\n');
+}
+
 function buildUserMessage(account) {
   return `
 Generate a full outreach package for the following target account.
@@ -88,12 +103,18 @@ Trigger Type: ${account.trigger_type || 'N/A'}
 Trigger Score: ${account.trigger_score ?? 'N/A'}
 Trigger Context: ${account.context || 'N/A'}
 
-Primary Contact:
+Primary Contact (lead touch - center account_brief, cold_call_script, linkedin_request,
+linkedin_dm, and the email sequence on this person):
 Name: ${account.primary_first_name || ''} ${account.primary_last_name || ''}
 Title: ${account.primary_title || 'N/A'}
 Email: ${account.primary_email || 'N/A'}
 LinkedIn: ${account.primary_linkedin || 'N/A'}
 Direct Dial: ${account.primary_direct_dial || 'N/A'}
+
+Additional Verified Contacts (use these to inform overall account strategy - who else at this
+account matters, what persona/layer they represent, and which channel fits them - but the assets
+you generate below should still be written for the Primary Contact above, not these):
+${formatAdditionalContacts(account.additional_contacts)}
 
 ${OUTPUT_INSTRUCTIONS}
 `.trim();
