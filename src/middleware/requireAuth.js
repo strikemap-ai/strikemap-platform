@@ -50,3 +50,24 @@ export async function hasAnyAdminRole(userId) {
 
   return Boolean(data && data.length > 0);
 }
+
+// Every client this user has a role on, with their rep identity for each - lets the frontend
+// resolve which client(s) to show instead of a hardcoded build-time client_id.
+export async function listUserAccess(userId) {
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('client_id, role, rep_id, clients (name), reps (name)')
+    .eq('user_id', userId);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).map((row) => ({
+    client_id: row.client_id,
+    name: row.clients?.name || null,
+    role: row.role,
+    rep_id: row.rep_id,
+    rep_name: row.reps?.name || null,
+  }));
+}

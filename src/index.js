@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import healthRouter from './routes/health.js';
+import meRouter from './routes/me.js';
 import triggerRouter from './routes/trigger.js';
 import digestRouter from './routes/digest.js';
 import adminRouter from './routes/admin.js';
@@ -21,6 +22,7 @@ app.use(cors({ origin: allowedOrigin }));
 app.use(express.json());
 
 app.use('/health', healthRouter);
+app.use('/api/me', meRouter);
 app.use('/api/trigger', triggerRouter);
 app.use('/api/digest', digestRouter);
 app.use('/api/admin', adminRouter);
