@@ -10,8 +10,10 @@ import approveRouter from './routes/approve.js';
 import rejectRouter from './routes/reject.js';
 import pipelineRouter from './routes/pipeline.js';
 import linkedinAcceptedRouter from './routes/linkedinAccepted.js';
+import enrichmentRouter from './routes/enrichment.js';
 import instantlyReplyRouter from './routes/webhooks/instantlyReply.js';
 import connectSafelyMessageRouter from './routes/webhooks/connectSafelyMessage.js';
+import clayEnrichmentCallbackRouter from './routes/webhooks/clayEnrichmentCallback.js';
 import { startLinkedInAcceptancePolling } from './jobs/linkedinAcceptancePoller.js';
 
 const app = express();
@@ -30,8 +32,10 @@ app.use('/api/approve', approveRouter);
 app.use('/api/reject', rejectRouter);
 app.use('/api/pipeline', pipelineRouter);
 app.use('/api/linkedin/accepted', linkedinAcceptedRouter);
+app.use('/api/enrichment', enrichmentRouter);
 app.use('/api/webhooks/instantly/reply', instantlyReplyRouter);
 app.use('/api/webhooks/connectsafely/message', connectSafelyMessageRouter);
+app.use('/api/webhooks/clay/enrichment', clayEnrichmentCallbackRouter);
 
 const PORT = process.env.PORT || 3000;
 

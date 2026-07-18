@@ -2,10 +2,22 @@ import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { requireAuth, getUserAccess, hasAnyAdminRole } from '../middleware/requireAuth.js';
 import { logOutreachAction } from '../services/outreachLog.js';
+import { getWeeklyClaySpend } from '../services/enrichmentService.js';
 
 const router = Router();
 
 router.use(requireAuth);
+
+async function recordBudgetChange(entry) {
+  const { error } = await supabase.from('rep_budget_changes').insert(entry);
+
+  if (error) {
+    console.error('Failed to write rep_budget_changes entry:', {
+      error: error.message,
+      entry,
+    });
+  }
+}
 
 router.get('/overview', async (req, res) => {
   if (!(await hasAnyAdminRole(req.user.id))) {
@@ -234,6 +246,105 @@ router.patch('/accounts/:accountId/reassign', async (req, res) => {
       admin_override: true,
     });
 
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// View-only per-rep enrichment budgets, following the same client-scoped admin pattern as
+// /unassigned above. current_week_clay_spend is for admin eyes only - never surfaced to reps.
+router.get('/reps/:clientId', async (req, res) => {
+  const { clientId } = req.params;
+
+  try {
+    const access = await getUserAccess(req.user.id, clientId);
+
+    if (!access || access.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required for this client' });
+    }
+
+    const { data: reps, error } = await supabase
+      .from('reps')
+      .select('id, name, email, weekly_enrichment_budget, status')
+      .eq('client_id', clientId)
+      .order('name', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    const repsWithSpend = await Promise.all(
+      (reps || []).map(async (rep) => ({
+        ...rep,
+        current_week_clay_spend: await getWeeklyClaySpend(rep.id),
+      }))
+    );
+
+    return res.status(200).json({ client_id: clientId, reps: repsWithSpend });
+  } catch (err) {
+    console.error('Error fetching rep budgets:', {
+      client_id: clientId,
+      error: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.patch('/reps/:repId/budget', async (req, res) => {
+  const { repId } = req.params;
+  const { weekly_enrichment_budget } = req.body;
+
+  if (weekly_enrichment_budget !== null && typeof weekly_enrichment_budget !== 'number') {
+    return res.status(400).json({ error: 'weekly_enrichment_budget must be a number or null' });
+  }
+
+  if (typeof weekly_enrichment_budget === 'number' && weekly_enrichment_budget < 0) {
+    return res.status(400).json({ error: 'weekly_enrichment_budget must be zero or greater' });
+  }
+
+  try {
+    const { data: rep, error: fetchError } = await supabase
+      .from('reps')
+      .select('id, client_id, weekly_enrichment_budget')
+      .eq('id', repId)
+      .single();
+
+    if (fetchError || !rep) {
+      return res.status(404).json({ error: 'Rep not found' });
+    }
+
+    const access = await getUserAccess(req.user.id, rep.client_id);
+
+    if (!access || access.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required for this client' });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('reps')
+      .update({ weekly_enrichment_budget })
+      .eq('id', repId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    await recordBudgetChange({
+      rep_id: repId,
+      client_id: rep.client_id,
+      changed_by_user_id: req.user.id,
+      previous_budget: rep.weekly_enrichment_budget,
+      new_budget: weekly_enrichment_budget,
+    });
+
+    return res.status(200).json({ rep: updated });
+  } catch (err) {
+    console.error('Error updating rep budget:', {
+      rep_id: repId,
+      error: err.message,
+      stack: err.stack,
+    });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

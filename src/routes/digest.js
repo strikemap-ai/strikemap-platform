@@ -56,6 +56,7 @@ router.get('/:clientId', async (req, res) => {
           primary_email,
           primary_linkedin,
           primary_direct_dial,
+          additional_contacts,
           rep_id,
           reps ( name )
         )
@@ -92,6 +93,7 @@ router.get('/:clientId', async (req, res) => {
         primary_email: account.primary_email,
         primary_linkedin: account.primary_linkedin,
         primary_direct_dial: account.primary_direct_dial,
+        additional_contacts: account.additional_contacts || [],
         account_brief: asset.account_brief,
         cold_call_script: asset.cold_call_script,
         linkedin_request: asset.linkedin_request,

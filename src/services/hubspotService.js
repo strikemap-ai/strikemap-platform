@@ -45,6 +45,83 @@ async function searchContactOwnerByEmail(email, credentials) {
   return result.results?.[0]?.properties?.hubspot_owner_id || null;
 }
 
+async function searchContactDetailsByEmail(email, credentials) {
+  const result = await hubspotRequest(
+    'POST',
+    '/crm/v3/objects/contacts/search',
+    {
+      filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: email }] }],
+      properties: ['hubspot_owner_id', 'email', 'phone', 'mobilephone', 'hs_linkedin_url'],
+      limit: 1,
+    },
+    credentials.accessToken
+  );
+
+  const properties = result.results?.[0]?.properties;
+
+  if (!properties) {
+    return null;
+  }
+
+  return {
+    ownerId: properties.hubspot_owner_id || null,
+    email: properties.email || null,
+    phone: properties.phone || properties.mobilephone || null,
+    // hs_linkedin_url is not a guaranteed standard HubSpot property - some portals don't have
+    // it at all. Verify against each client's actual property schema before relying on it;
+    // this will silently return null on any portal where it doesn't exist.
+    linkedin: properties.hs_linkedin_url || null,
+  };
+}
+
+// Contact-first (by email), since this exists to recover a specific person's personal fields -
+// unlike findOwnerId, which is company-first because it only cares about account-level
+// ownership. Falls back to a company/domain match for at least an ownerId when there's no email
+// to search on, but a company match alone has no personal fields to return.
+export async function findContactDetails(client, { domain, email }) {
+  let credentials;
+
+  try {
+    credentials = validateCredentials(client);
+  } catch (err) {
+    console.warn('HubSpot contact lookup skipped:', {
+      client_id: client?.id,
+      error: err.message,
+    });
+    return { ownerId: null, email: null, phone: null, linkedin: null };
+  }
+
+  if (email) {
+    try {
+      const details = await searchContactDetailsByEmail(email, credentials);
+      if (details) {
+        return details;
+      }
+    } catch (err) {
+      console.warn('HubSpot contact lookup failed, falling back to company lookup:', {
+        client_id: client?.id,
+        error: err.message,
+      });
+    }
+  }
+
+  if (domain) {
+    try {
+      const ownerId = await searchCompanyOwnerByDomain(domain, credentials);
+      if (ownerId) {
+        return { ownerId, email: null, phone: null, linkedin: null };
+      }
+    } catch (err) {
+      console.warn('HubSpot company lookup failed:', {
+        client_id: client?.id,
+        error: err.message,
+      });
+    }
+  }
+
+  return { ownerId: null, email: null, phone: null, linkedin: null };
+}
+
 // Company-first (by domain), falling back to contact (by email). Never throws - rep assignment
 // at trigger time must fail gracefully into "unassigned" rather than blocking account creation,
 // whether that's missing credentials, no match, or a HubSpot API error. Each search step is

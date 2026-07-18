@@ -1,18 +1,6 @@
 import { supabase } from '../db/client.js';
 import { findOwnerId } from './hubspotService.js';
-
-function extractDomain(url) {
-  if (!url) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-    return parsed.hostname.replace(/^www\./, '');
-  } catch {
-    return null;
-  }
-}
+import { extractDomain } from '../utils/domain.js';
 
 // Resolves which rep a newly-created account belongs to, via HubSpot's existing Deal/Contact
 // Owner field - never throws. Any failure (no credentials, no match, API error) resolves to
