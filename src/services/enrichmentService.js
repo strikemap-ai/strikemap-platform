@@ -5,21 +5,30 @@ import { extractDomain } from '../utils/domain.js';
 
 const CONTACT_FIELDS = ['email', 'phone', 'linkedin'];
 
-// Placeholder costs - swap for real per-lookup figures from Ali's Clay plan before this goes
-// live. Cost is computed live from fields_requested rather than persisted on each row, since
-// enrichment_requests carries no cost column.
+// Real per-lookup costs from Ali's Clay plan (2026-07-20). Cost is computed live from
+// fields_requested rather than persisted on each row, since enrichment_requests carries no cost
+// column.
 export const CLAY_COST_PER_FIELD = {
-  email: null,
-  phone: null,
-  linkedin: null,
+  email: 0.3,
+  phone: 0.3,
+  linkedin: 0.46,
 };
+
+// Which fields Clay's table can actually attempt right now. Phone/LinkedIn enrichment paths are
+// deferred - Clay has no provider configured for them yet, so a request that asks for them still
+// gets sent (needs_phone/needs_linkedin=true), but never actually costs anything until a real
+// path exists. Add a field here the same day its Clay path goes live, not before - otherwise
+// rep budgets get charged for lookups Clay never actually performs.
+const ACTIVE_CLAY_FIELDS = ['email'];
 
 function isDryRun() {
   return process.env.DRY_RUN === 'true';
 }
 
 function costForFields(fields) {
-  return (fields || []).reduce((total, field) => total + (CLAY_COST_PER_FIELD[field] || 0), 0);
+  return (fields || [])
+    .filter((field) => ACTIVE_CLAY_FIELDS.includes(field))
+    .reduce((total, field) => total + (CLAY_COST_PER_FIELD[field] || 0), 0);
 }
 
 // Monday 00:00 UTC - Sunday 23:59:59 UTC. Chosen over a rolling 7-day window for simplicity:
