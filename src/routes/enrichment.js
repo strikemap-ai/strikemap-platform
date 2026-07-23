@@ -24,14 +24,18 @@ async function loadOwnedAccount(req, res, accountId) {
   }
 
   const access = await getUserAccess(req.user.id, account.client_id);
+  const isAdmin = access?.role === 'admin';
+  const isOwnAccount = Boolean(access) && account.rep_id !== null && account.rep_id === access.repId;
 
-  // Rep-scoped only, no admin override - matches the access model already used for approve/reject.
-  if (!access || account.rep_id !== access.repId) {
+  // Admin can act on any account in their client, including unassigned ones (rep_id null) -
+  // same admin-override pattern as approve/reject. A regular rep is still strictly scoped to
+  // their own accounts.
+  if (!access || (!isAdmin && !isOwnAccount)) {
     res.status(403).json({ error: 'This account is not assigned to you' });
     return null;
   }
 
-  return { account, access };
+  return { account, access, adminOverride: isAdmin && !isOwnAccount };
 }
 
 router.post('/hubspot', async (req, res) => {
@@ -50,7 +54,13 @@ router.post('/hubspot', async (req, res) => {
       return res.status(404).json({ error: 'Contact not found on this account' });
     }
 
-    const result = await enrichFromHubSpot(owned.account.clients, resolved.account, resolved.contactRef, req.user.id);
+    const result = await enrichFromHubSpot(
+      owned.account.clients,
+      resolved.account,
+      resolved.contactRef,
+      req.user.id,
+      owned.adminOverride
+    );
 
     return res.status(200).json(result);
   } catch (err) {
@@ -84,8 +94,11 @@ router.post('/waterfall', async (req, res) => {
       owned.account.clients,
       resolved.account,
       resolved.contactRef,
-      owned.access.repId,
-      req.user.id
+      // The account's OWN rep_id, not the caller's - an admin acting on an unassigned account
+      // (rep_id null) must never have this billed against their own personal rep budget.
+      resolved.account.rep_id,
+      req.user.id,
+      owned.adminOverride
     );
 
     if (result.status === 'budget_exceeded') {
@@ -123,8 +136,11 @@ router.get('/status/:requestId', async (req, res) => {
     }
 
     const access = await getUserAccess(req.user.id, request.accounts.client_id);
+    const isAdmin = access?.role === 'admin';
+    const isOwnAccount =
+      Boolean(access) && request.accounts.rep_id !== null && request.accounts.rep_id === access.repId;
 
-    if (!access || request.accounts.rep_id !== access.repId) {
+    if (!access || (!isAdmin && !isOwnAccount)) {
       return res.status(403).json({ error: 'This account is not assigned to you' });
     }
 

@@ -43,7 +43,7 @@ router.post('/', validateWebhook, async (req, res) => {
       return res.status(400).json({ error: 'additional_contacts must be a valid JSON array' });
     }
 
-    const rep_id = await resolveRepId(client, {
+    const { repId: rep_id, reason: unassigned_reason } = await resolveRepId(client, {
       companyWebsite: company_website,
       primaryEmail: primary_email,
     });
@@ -70,6 +70,7 @@ router.post('/', validateWebhook, async (req, res) => {
         additional_contacts: additional_contacts || [],
         raw_payload: req.body,
         rep_id,
+        unassigned_reason,
       })
       .select()
       .single();

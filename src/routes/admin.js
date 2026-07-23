@@ -147,6 +147,11 @@ router.get('/unassigned/:clientId', async (req, res) => {
         primary_first_name,
         primary_last_name,
         primary_title,
+        primary_email,
+        primary_direct_dial,
+        primary_linkedin,
+        additional_contacts,
+        unassigned_reason,
         assets ( id, sequence_status, created_at )
       `
       )
@@ -207,7 +212,9 @@ router.patch('/accounts/:accountId/reassign', async (req, res) => {
 
     const { data: updated, error: updateError } = await supabase
       .from('accounts')
-      .update({ rep_id: nextRepId })
+      // A real assignment makes unassigned_reason moot - clear it so the unassigned-accounts
+      // view doesn't keep showing a stale reason for an account that's no longer unassigned.
+      .update({ rep_id: nextRepId, ...(nextRepId ? { unassigned_reason: null } : {}) })
       .eq('id', accountId)
       .select()
       .single();

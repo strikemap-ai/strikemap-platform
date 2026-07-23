@@ -65,6 +65,12 @@ export async function getWeeklyClaySpend(repId) {
 }
 
 async function getRepBudget(repId) {
+  // null repId means an admin acting on an unassigned account - there's no rep to charge, so
+  // this is treated as unlimited for this one request rather than erroring.
+  if (!repId) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from('reps')
     .select('weekly_enrichment_budget')
@@ -273,7 +279,7 @@ async function postToClayWebhook(payload) {
   }
 }
 
-async function runHubSpotStep(client, account, contactRef, target, missing, userId) {
+async function runHubSpotStep(client, account, contactRef, target, missing, userId, adminOverride) {
   const details = await findContactDetails(client, {
     domain: extractDomain(account.company_website),
     email: target.fields.email,
@@ -298,6 +304,7 @@ async function runHubSpotStep(client, account, contactRef, target, missing, user
     source: 'hubspot',
     result: found,
     completed_at: new Date().toISOString(),
+    admin_override: Boolean(adminOverride),
   });
 
   const updatedAccount = status === 'success' ? await applyEnrichedFields(account, contactRef, found) : account;
@@ -306,7 +313,7 @@ async function runHubSpotStep(client, account, contactRef, target, missing, user
 }
 
 // Free, HubSpot-only. Never touches Clay or the weekly budget.
-export async function enrichFromHubSpot(client, account, contactRef, userId) {
+export async function enrichFromHubSpot(client, account, contactRef, userId, adminOverride = false) {
   const target = resolveContactTarget(account, contactRef);
 
   if (!target) {
@@ -319,14 +326,16 @@ export async function enrichFromHubSpot(client, account, contactRef, userId) {
     return { status: 'no_match', source: null, fields_requested: [], result: null };
   }
 
-  const { status, found } = await runHubSpotStep(client, account, contactRef, target, missing, userId);
+  const { status, found } = await runHubSpotStep(client, account, contactRef, target, missing, userId, adminOverride);
 
   return { status, source: 'hubspot', fields_requested: missing, result: found };
 }
 
 // HubSpot first (free), Clay only for whatever HubSpot didn't resolve. Only the Clay portion is
-// checked against / counted toward the rep's weekly budget.
-export async function enrichWaterfall(client, account, contactRef, repId, userId) {
+// checked against / counted toward the rep's weekly budget. repId is the ACCOUNT's own rep_id,
+// not necessarily the caller's - null when an admin is acting on an unassigned account, in which
+// case the budget check is skipped entirely rather than charged to the admin's own rep identity.
+export async function enrichWaterfall(client, account, contactRef, repId, userId, adminOverride = false) {
   const target = resolveContactTarget(account, contactRef);
 
   if (!target) {
@@ -339,7 +348,7 @@ export async function enrichWaterfall(client, account, contactRef, repId, userId
     return { status: 'no_match', source: null, fields_requested: [], result: null };
   }
 
-  const hubspotStep = await runHubSpotStep(client, account, contactRef, target, missing, userId);
+  const hubspotStep = await runHubSpotStep(client, account, contactRef, target, missing, userId, adminOverride);
   const stillMissing = missing.filter((field) => !hubspotStep.found[field]);
 
   if (stillMissing.length === 0) {
@@ -367,6 +376,7 @@ export async function enrichWaterfall(client, account, contactRef, repId, userId
       fields_requested: stillMissing,
       status: 'pending',
       source: 'clay',
+      admin_override: Boolean(adminOverride),
     })
     .select()
     .single();

@@ -126,7 +126,10 @@ export async function findContactDetails(client, { domain, email }) {
 // at trigger time must fail gracefully into "unassigned" rather than blocking account creation,
 // whether that's missing credentials, no match, or a HubSpot API error. Each search step is
 // independently caught - a company-search failure (missing scopes, API error, etc.) must not
-// prevent the contact-search fallback from running.
+// prevent the contact-search fallback from running. Returns a reason alongside a null ownerId so
+// callers can distinguish "genuinely no match" from "credentials missing" from "a lookup step
+// errored" - all three used to collapse into the same unassigned rep_id with no way to tell them
+// apart later.
 export async function findOwnerId(client, { domain, email }) {
   let credentials;
 
@@ -137,20 +140,23 @@ export async function findOwnerId(client, { domain, email }) {
       client_id: client?.id,
       error: err.message,
     });
-    return null;
+    return { ownerId: null, reason: 'no_hubspot_credentials' };
   }
+
+  let sawApiError = false;
 
   if (domain) {
     try {
       const ownerId = await searchCompanyOwnerByDomain(domain, credentials);
       if (ownerId) {
-        return ownerId;
+        return { ownerId, reason: null };
       }
     } catch (err) {
       console.warn('HubSpot company lookup failed, falling back to contact lookup:', {
         client_id: client?.id,
         error: err.message,
       });
+      sawApiError = true;
     }
   }
 
@@ -158,17 +164,18 @@ export async function findOwnerId(client, { domain, email }) {
     try {
       const ownerId = await searchContactOwnerByEmail(email, credentials);
       if (ownerId) {
-        return ownerId;
+        return { ownerId, reason: null };
       }
     } catch (err) {
       console.warn('HubSpot contact lookup failed, leaving account unassigned:', {
         client_id: client?.id,
         error: err.message,
       });
+      sawApiError = true;
     }
   }
 
-  return null;
+  return { ownerId: null, reason: sawApiError ? 'hubspot_api_error' : 'no_hubspot_match' };
 }
 
 // Confirmed against the live account via GET /crm/v4/associations/{from}/{to}/labels
