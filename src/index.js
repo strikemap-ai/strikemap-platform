@@ -15,6 +15,7 @@ import instantlyReplyRouter from './routes/webhooks/instantlyReply.js';
 import connectSafelyMessageRouter from './routes/webhooks/connectSafelyMessage.js';
 import clayEnrichmentCallbackRouter from './routes/webhooks/clayEnrichmentCallback.js';
 import { startLinkedInAcceptancePolling } from './jobs/linkedinAcceptancePoller.js';
+import { startDeliverabilityPolling } from './jobs/deliverabilityPoller.js';
 
 const app = express();
 
@@ -44,3 +45,4 @@ app.listen(PORT, () => {
 });
 
 startLinkedInAcceptancePolling();
+startDeliverabilityPolling();

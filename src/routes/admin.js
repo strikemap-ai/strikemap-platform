@@ -3,6 +3,7 @@ import { supabase } from '../db/client.js';
 import { requireAuth, getUserAccess, hasAnyAdminRole } from '../middleware/requireAuth.js';
 import { logOutreachAction } from '../services/outreachLog.js';
 import { getWeeklyClaySpend } from '../services/enrichmentService.js';
+import { computeBounceRate } from '../services/deliverabilityService.js';
 
 const router = Router();
 
@@ -342,6 +343,70 @@ router.patch('/reps/:repId/budget', async (req, res) => {
   } catch (err) {
     console.error('Error updating rep budget:', {
       rep_id: repId,
+      error: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Latest deliverability snapshot only, v1 keeps this simple - no history/trend yet. Clients
+// without an Instantly campaign configured (e.g. Pallet) get a clean "no data" response, not
+// an error - same graceful-skip pattern as every other per-client integration.
+router.get('/deliverability/:clientId', async (req, res) => {
+  const { clientId } = req.params;
+
+  try {
+    const access = await getUserAccess(req.user.id, clientId);
+
+    if (!access || access.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required for this client' });
+    }
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, instantly_api_key, instantly_campaign_id')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!client.instantly_api_key || !client.instantly_campaign_id) {
+      return res.status(200).json({ client_id: clientId, configured: false, snapshot: null });
+    }
+
+    const { data: snapshot, error } = await supabase
+      .from('deliverability_snapshots')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('checked_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!snapshot) {
+      return res.status(200).json({ client_id: clientId, configured: true, snapshot: null });
+    }
+
+    const bounceRate = computeBounceRate(snapshot);
+
+    return res.status(200).json({
+      client_id: clientId,
+      configured: true,
+      snapshot: {
+        ...snapshot,
+        bounce_rate: bounceRate,
+        bounce_rate_exceeded: bounceRate !== null && bounceRate > 0.02,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching deliverability snapshot:', {
+      client_id: clientId,
       error: err.message,
       stack: err.stack,
     });
