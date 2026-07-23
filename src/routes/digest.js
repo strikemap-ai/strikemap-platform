@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
+import { resolveDeliveryContact } from '../services/deliveryContact.js';
 
 const router = Router();
 
@@ -34,6 +35,7 @@ router.get('/:clientId', async (req, res) => {
         `
         id,
         account_id,
+        contact_ref,
         account_brief,
         cold_call_script,
         linkedin_request,
@@ -45,6 +47,7 @@ router.get('/:clientId', async (req, res) => {
         email_subject_3,
         email_step_3,
         sequence_status,
+        meeting_booked_at,
         created_at,
         accounts!inner (
           trigger_score,
@@ -78,21 +81,25 @@ router.get('/:clientId', async (req, res) => {
 
     const accounts = (assets || []).map((asset) => {
       const account = asset.accounts || {};
-      const primaryName = [account.primary_first_name, account.primary_last_name]
+      // This asset's target contact - the account's primary contact by default, or whichever
+      // additional contact was activated into this seat.
+      const contact = resolveDeliveryContact(account, asset.contact_ref);
+      const contactName = [contact.primary_first_name, contact.primary_last_name]
         .filter(Boolean)
         .join(' ');
 
       return {
         asset_id: asset.id,
         account_id: asset.account_id,
+        contact_ref: asset.contact_ref,
         trigger_score: account.trigger_score,
         trigger_type: account.trigger_type,
         company_name: account.company_name,
-        primary_name: primaryName,
-        primary_title: account.primary_title,
-        primary_email: account.primary_email,
-        primary_linkedin: account.primary_linkedin,
-        primary_direct_dial: account.primary_direct_dial,
+        primary_name: contactName,
+        primary_title: contact.primary_title,
+        primary_email: contact.primary_email,
+        primary_linkedin: contact.primary_linkedin,
+        primary_direct_dial: contact.primary_direct_dial,
         additional_contacts: account.additional_contacts || [],
         account_brief: asset.account_brief,
         cold_call_script: asset.cold_call_script,
@@ -105,6 +112,7 @@ router.get('/:clientId', async (req, res) => {
         email_subject_3: asset.email_subject_3,
         email_step_3: asset.email_step_3,
         sequence_status: asset.sequence_status,
+        meeting_booked_at: asset.meeting_booked_at,
         created_at: asset.created_at,
         ...(isAdmin ? { assigned_rep: account.reps?.name || null } : {}),
       };

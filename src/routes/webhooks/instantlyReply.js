@@ -34,29 +34,54 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Missing lead_email in payload' });
     }
 
-    const { data: account, error: accountError } = await supabase
+    const { data: primaryMatch, error: primaryError } = await supabase
       .from('accounts')
       .select('id')
       .eq('primary_email', lead_email)
       .maybeSingle();
 
-    if (accountError) {
-      throw accountError;
+    if (primaryError) {
+      throw primaryError;
     }
 
-    if (!account) {
-      console.warn('No matching account for Instantly reply:', { lead_email });
+    let accountId = primaryMatch?.id ?? null;
+    let contactRef = primaryMatch ? 'primary' : null;
+
+    // A reply can come from any activated additional contact's own email, not just the primary
+    // contact - additional_contacts @> match finds the account whose array contains an entry
+    // with this exact email.
+    if (!accountId) {
+      const { data: additionalMatch, error: additionalError } = await supabase
+        .from('accounts')
+        .select('id, additional_contacts')
+        .contains('additional_contacts', [{ email: lead_email }])
+        .maybeSingle();
+
+      if (additionalError) {
+        throw additionalError;
+      }
+
+      if (additionalMatch) {
+        const entry = (additionalMatch.additional_contacts || []).find((c) => c.email === lead_email);
+        if (entry?.id) {
+          accountId = additionalMatch.id;
+          contactRef = entry.id;
+        }
+      }
+    }
+
+    if (!accountId || !contactRef) {
+      console.warn('No matching account/contact for Instantly reply:', { lead_email });
       return res.status(200).json({ status: 'no_matching_asset' });
     }
 
     const { data: asset, error: assetError } = await supabase
       .from('assets')
-      .select('id, client_id, account_id, hubspot_deal_id, clients (*)')
-      .eq('account_id', account.id)
+      .select('id, client_id, account_id, contact_ref, hubspot_deal_id, clients (*)')
+      .eq('account_id', accountId)
+      .eq('contact_ref', contactRef)
       .eq('sequence_status', 'approved')
       .is('replied_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
       .maybeSingle();
 
     if (assetError) {

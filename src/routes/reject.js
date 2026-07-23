@@ -38,9 +38,12 @@ router.post('/:assetId', async (req, res) => {
 
     const adminOverride = isAdmin && !isOwnAccount;
 
+    const now = new Date().toISOString();
     const updates = {
       sequence_status: 'rejected',
-      rejected_at: new Date().toISOString(),
+      rejected_at: now,
+      slot_freed_at: now,
+      slot_freed_reason: 'rejected',
     };
 
     if (reason !== undefined) {

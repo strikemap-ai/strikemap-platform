@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
+import { resolveDeliveryContact } from '../services/deliveryContact.js';
 
 const router = Router();
 
@@ -11,9 +12,11 @@ const STAGE_BY_STATUS = {
   pending_dm: 'Signal',
   approved: 'Outreach Sent',
   replied: 'Replied',
+  meeting_booked: 'Discovery Booked',
 };
 
 const ACTIVITY_TIMESTAMP_FIELDS = [
+  'meeting_booked_at',
   'replied_at',
   'approved_at',
   'rejected_at',
@@ -66,6 +69,7 @@ router.get('/:clientId', async (req, res) => {
         `
         id,
         account_id,
+        contact_ref,
         sequence_status,
         created_at,
         approved_at,
@@ -75,6 +79,7 @@ router.get('/:clientId', async (req, res) => {
         linkedin_connection_accepted_at,
         linkedin_dm_sent_at,
         email_step_1_sent_at,
+        meeting_booked_at,
         accounts!inner (
           id,
           company_name,
@@ -82,6 +87,7 @@ router.get('/:clientId', async (req, res) => {
           trigger_date,
           primary_first_name,
           primary_last_name,
+          additional_contacts,
           rep_id,
           reps ( name )
         )
@@ -102,10 +108,13 @@ router.get('/:clientId', async (req, res) => {
       throw assetsError;
     }
 
-    const latestAssetByAccount = new Map();
+    // Keyed by account+contact, not just account - an account can now have up to 3 assets
+    // active at once (primary plus activated additional contacts), each a distinct pipeline card.
+    const latestAssetByAccountContact = new Map();
     for (const asset of assets || []) {
-      if (!latestAssetByAccount.has(asset.account_id)) {
-        latestAssetByAccount.set(asset.account_id, asset);
+      const key = `${asset.account_id}:${asset.contact_ref}`;
+      if (!latestAssetByAccountContact.has(key)) {
+        latestAssetByAccountContact.set(key, asset);
       }
     }
 
@@ -113,26 +122,30 @@ router.get('/:clientId', async (req, res) => {
       Signal: [],
       'Outreach Sent': [],
       Replied: [],
+      'Discovery Booked': [],
     };
 
-    for (const asset of latestAssetByAccount.values()) {
+    for (const asset of latestAssetByAccountContact.values()) {
       const stage = STAGE_BY_STATUS[asset.sequence_status];
       if (!stage) {
         continue;
       }
 
       const account = asset.accounts || {};
-      const contactName = [account.primary_first_name, account.primary_last_name]
+      const deliveryContact = resolveDeliveryContact(account, asset.contact_ref);
+      const contactName = [deliveryContact.primary_first_name, deliveryContact.primary_last_name]
         .filter(Boolean)
         .join(' ');
 
       stages[stage].push({
         account_id: asset.account_id,
         asset_id: asset.id,
+        contact_ref: asset.contact_ref,
         company_name: account.company_name,
         contact_name: contactName,
         trigger_type: account.trigger_type,
         sequence_status: asset.sequence_status,
+        meeting_booked_at: asset.meeting_booked_at,
         days_since_last_activity: daysSince(lastActivityAt(asset, account)),
         ...(isAdmin ? { assigned_rep: account.reps?.name || null } : {}),
       });

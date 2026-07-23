@@ -5,6 +5,7 @@ import {
   handleConnectionAccepted,
   backfillProfileUrn,
 } from '../services/connectSafelyService.js';
+import { resolveDeliveryContact } from '../services/deliveryContact.js';
 
 const POLL_INTERVAL_MS = Number(process.env.LINKEDIN_POLL_INTERVAL_MINUTES || 30) * 60 * 1000;
 const DELAY_BETWEEN_CHECKS_MS = 2000;
@@ -16,7 +17,7 @@ function sleep(ms) {
 export async function pollPendingConnections() {
   const { data: pending, error } = await supabase
     .from('assets')
-    .select('id, client_id, account_id, linkedin_dm, accounts (primary_linkedin)')
+    .select('id, client_id, account_id, contact_ref, linkedin_dm, accounts (primary_linkedin, additional_contacts)')
     .not('linkedin_connection_sent_at', 'is', null)
     .is('linkedin_connection_accepted_at', null);
 
@@ -45,7 +46,8 @@ export async function pollPendingConnections() {
   const clientsById = new Map((clients || []).map((client) => [client.id, client]));
 
   for (const asset of pending) {
-    const profileId = extractProfileSlug(asset.accounts?.primary_linkedin);
+    const deliveryContact = resolveDeliveryContact(asset.accounts || {}, asset.contact_ref);
+    const profileId = extractProfileSlug(deliveryContact.primary_linkedin);
 
     if (!profileId) {
       continue;
@@ -61,7 +63,7 @@ export async function pollPendingConnections() {
       await backfillProfileUrn(asset.id, relationship.profileUrn);
 
       if (relationship.status === 'CONNECTED') {
-        await handleConnectionAccepted(asset, asset.accounts || {}, client);
+        await handleConnectionAccepted(asset, deliveryContact, client);
         console.log('LinkedIn connection accepted:', { asset_id: asset.id, profileId });
       }
 

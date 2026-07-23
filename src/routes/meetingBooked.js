@@ -1,26 +1,12 @@
 import { Router } from 'express';
 import { supabase } from '../db/client.js';
 import { logOutreachAction } from '../services/outreachLog.js';
-import { executeOutreachChannels } from '../services/outreachExecution.js';
-import { resolveDeliveryContact } from '../services/deliveryContact.js';
+import { stopInstantlySequence } from '../services/instantlyService.js';
 import { requireAuth, getUserAccess } from '../middleware/requireAuth.js';
 
 const router = Router();
 
 router.use(requireAuth);
-
-const EDITABLE_ASSET_FIELDS = [
-  'account_brief',
-  'cold_call_script',
-  'linkedin_request',
-  'linkedin_dm',
-  'email_subject_1',
-  'email_step_1',
-  'email_subject_2',
-  'email_step_2',
-  'email_subject_3',
-  'email_step_3',
-];
 
 router.post('/:assetId', async (req, res) => {
   const { assetId } = req.params;
@@ -30,29 +16,9 @@ router.post('/:assetId', async (req, res) => {
       .from('assets')
       .select(
         `
-        id,
-        client_id,
-        account_id,
-        accounts (
-          company_name,
-          primary_first_name,
-          primary_last_name,
-          primary_email,
-          primary_title,
-          primary_linkedin,
-          primary_direct_dial,
-          additional_contacts,
-          rep_id
-        ),
-        clients (
-          id,
-          hubspot_access_token,
-          hubspot_pipeline_id,
-          instantly_api_key,
-          instantly_campaign_id,
-          connectsafely_api_key,
-          connectsafely_account_id
-        )
+        id, client_id, account_id, instantly_contact_id, meeting_booked_at,
+        accounts ( rep_id ),
+        clients ( id, instantly_api_key, instantly_campaign_id )
       `
       )
       .eq('id', assetId)
@@ -60,6 +26,10 @@ router.post('/:assetId', async (req, res) => {
 
     if (fetchError || !existing) {
       return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    if (existing.meeting_booked_at) {
+      return res.status(200).json({ status: 'already_booked' });
     }
 
     const access = await getUserAccess(req.user.id, existing.client_id);
@@ -77,20 +47,15 @@ router.post('/:assetId', async (req, res) => {
     }
 
     const adminOverride = isAdmin && !isOwnAccount;
-
-    const edits = {};
-    for (const field of EDITABLE_ASSET_FIELDS) {
-      if (req.body[field] !== undefined) {
-        edits[field] = req.body[field];
-      }
-    }
+    const now = new Date().toISOString();
 
     const { data: asset, error: updateError } = await supabase
       .from('assets')
       .update({
-        ...edits,
-        sequence_status: 'approved',
-        approved_at: new Date().toISOString(),
+        sequence_status: 'meeting_booked',
+        meeting_booked_at: now,
+        slot_freed_at: now,
+        slot_freed_reason: 'meeting_booked',
       })
       .eq('id', assetId)
       .select()
@@ -100,24 +65,25 @@ router.post('/:assetId', async (req, res) => {
       throw updateError;
     }
 
+    if (existing.instantly_contact_id) {
+      await stopInstantlySequence(asset, existing.clients);
+    }
+
     await logOutreachAction({
       client_id: existing.client_id,
       asset_id: existing.id,
       account_id: existing.account_id,
       channel: 'dashboard',
-      action: 'approve',
+      action: 'meeting_booked',
       outcome: 'success',
       performed_by_user_id: req.user.id,
       admin_override: adminOverride,
       target_rep_id: accountRepId,
     });
 
-    const deliveryContact = resolveDeliveryContact(existing.accounts || {}, asset.contact_ref);
-    await executeOutreachChannels(asset, deliveryContact, existing.clients);
-
     return res.status(200).json({ asset });
   } catch (err) {
-    console.error('Error approving asset:', {
+    console.error('Error marking meeting booked:', {
       asset_id: assetId,
       error: err.message,
       stack: err.stack,
@@ -126,7 +92,7 @@ router.post('/:assetId', async (req, res) => {
     await logOutreachAction({
       asset_id: assetId,
       channel: 'dashboard',
-      action: 'approve',
+      action: 'meeting_booked',
       outcome: 'error',
       error_message: err.message,
     });

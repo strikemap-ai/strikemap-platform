@@ -5,6 +5,7 @@ import Anthropic, {
   RateLimitError,
 } from '@anthropic-ai/sdk';
 import { supabase } from '../db/client.js';
+import { resolveDeliveryContact } from './deliveryContact.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -89,7 +90,30 @@ function formatAdditionalContacts(contacts) {
     .join('\n');
 }
 
-function buildUserMessage(account) {
+// Which other verified contacts to show as strategic context, excluding whoever this specific
+// asset is being written for - once an additional contact is the target, the account's primary
+// contact becomes "someone else at this account" from their perspective, and vice versa.
+function buildContextContacts(account, contactRef) {
+  const others = (account.additional_contacts || []).filter((c) => c.id !== contactRef);
+
+  if (contactRef === 'primary') {
+    return others;
+  }
+
+  const primaryAsContact = {
+    first_name: account.primary_first_name,
+    last_name: account.primary_last_name,
+    title: account.primary_title,
+    priority: 'Primary',
+  };
+
+  return [primaryAsContact, ...others];
+}
+
+function buildUserMessage(account, contactRef) {
+  const target = resolveDeliveryContact(account, contactRef);
+  const contextContacts = buildContextContacts(account, contactRef);
+
   return `
 Generate a full outreach package for the following target account.
 
@@ -103,18 +127,18 @@ Trigger Type: ${account.trigger_type || 'N/A'}
 Trigger Score: ${account.trigger_score ?? 'N/A'}
 Trigger Context: ${account.context || 'N/A'}
 
-Primary Contact (lead touch - center account_brief, cold_call_script, linkedin_request,
-linkedin_dm, and the email sequence on this person):
-Name: ${account.primary_first_name || ''} ${account.primary_last_name || ''}
-Title: ${account.primary_title || 'N/A'}
-Email: ${account.primary_email || 'N/A'}
-LinkedIn: ${account.primary_linkedin || 'N/A'}
-Direct Dial: ${account.primary_direct_dial || 'N/A'}
+Target Contact (center account_brief, cold_call_script, linkedin_request, linkedin_dm, and the
+email sequence on this person specifically):
+Name: ${target.primary_first_name || ''} ${target.primary_last_name || ''}
+Title: ${target.primary_title || 'N/A'}
+Email: ${target.primary_email || 'N/A'}
+LinkedIn: ${target.primary_linkedin || 'N/A'}
+Direct Dial: ${target.primary_direct_dial || 'N/A'}
 
-Additional Verified Contacts (use these to inform overall account strategy - who else at this
-account matters, what persona/layer they represent, and which channel fits them - but the assets
-you generate below should still be written for the Primary Contact above, not these):
-${formatAdditionalContacts(account.additional_contacts)}
+Other Verified Contacts at This Account (use these to inform overall account strategy - who else
+matters, what persona/layer they represent, and which channel fits them - but the assets you
+generate below should still be written for the Target Contact above, not these):
+${formatAdditionalContacts(contextContacts)}
 
 ${OUTPUT_INSTRUCTIONS}
 `.trim();
@@ -129,8 +153,8 @@ function extractJson(rawText) {
   return JSON.parse(text);
 }
 
-export async function runPromptEngine(client, account) {
-  console.log('Loading system prompt', { client_id: client.id });
+export async function runPromptEngine(client, account, contactRef = 'primary') {
+  console.log('Loading system prompt', { client_id: client.id, contact_ref: contactRef });
 
   const { data: promptRow, error: promptError } = await supabase
     .from('system_prompts')
@@ -151,10 +175,10 @@ export async function runPromptEngine(client, account) {
     );
   }
 
-  const userMessage = buildUserMessage(account);
+  const userMessage = buildUserMessage(account, contactRef);
 
   try {
-    console.log('Calling Claude API', { client_id: client.id, account_id: account.id });
+    console.log('Calling Claude API', { client_id: client.id, account_id: account.id, contact_ref: contactRef });
 
     const response = await callClaudeWithRetry(
       {
@@ -176,6 +200,7 @@ export async function runPromptEngine(client, account) {
     const { error: insertError } = await supabase.from('assets').insert({
       client_id: client.id,
       account_id: account.id,
+      contact_ref: contactRef,
       touch_number: 1,
       account_brief: parsed.account_brief,
       cold_call_script: parsed.cold_call_script,
@@ -208,6 +233,7 @@ export async function runPromptEngine(client, account) {
     await supabase.from('assets').insert({
       client_id: client.id,
       account_id: account.id,
+      contact_ref: contactRef,
       touch_number: 1,
       sequence_status: 'error',
       rejection_reason: err.message,

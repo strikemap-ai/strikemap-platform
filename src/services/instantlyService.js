@@ -140,6 +140,36 @@ export async function stopInstantlySequence(asset, client) {
   }
 }
 
+// Instantly's Lead object exposes a numeric `status` field (confirmed via their docs, not yet
+// against a real enrolled lead - Strikemap's real campaign has zero leads in it as of this
+// writing, so this hasn't been checked against a live response body). 1=Active, 2=Paused,
+// 3=Completed, -1=Bounced, -2=Unsubscribed, -3=Skipped. Treat a 404 (lead no longer in the
+// campaign - e.g. removed by stopInstantlySequence on reply) the same as a terminal status.
+export const INSTANTLY_EMAIL_TERMINAL_STATUSES = [3, -1, -2, -3];
+
+export async function getInstantlyLeadStatus(leadId, client) {
+  const credentials = validateCredentials(client);
+
+  const res = await fetch(`${INSTANTLY_API_BASE}/leads/${leadId}`, {
+    headers: { Authorization: `Bearer ${credentials.apiKey}` },
+  });
+
+  if (res.status === 404) {
+    return { found: false, status: null };
+  }
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const message = body?.message || res.statusText;
+    const error = new Error(`Instantly API error (${res.status}): ${message}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return { found: true, status: body?.status ?? null };
+}
+
 export async function runInstantlyChannel(asset, account, client) {
   try {
     if (!account.primary_email) {
