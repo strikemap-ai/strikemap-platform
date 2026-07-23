@@ -6,6 +6,7 @@ import Anthropic, {
 } from '@anthropic-ai/sdk';
 import { supabase } from '../db/client.js';
 import { resolveDeliveryContact } from './deliveryContact.js';
+import { promptFacingTriggerType } from './triggerTypes.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -123,7 +124,7 @@ Company Website: ${account.company_website || 'N/A'}
 Headcount: ${account.company_headcount || 'N/A'}
 Funding Stage: ${account.funding_stage || 'N/A'}
 Total Funding: ${account.total_funding || 'N/A'}
-Trigger Type: ${account.trigger_type || 'N/A'}
+Trigger Type: ${promptFacingTriggerType(account.trigger_type)}
 Trigger Score: ${account.trigger_score ?? 'N/A'}
 Trigger Context: ${account.context || 'N/A'}
 
