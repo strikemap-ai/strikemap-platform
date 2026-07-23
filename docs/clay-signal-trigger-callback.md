@@ -57,7 +57,7 @@ suffixes.
 | Business expansion | `Business expansion` |
 | Supply chain disruption | `Supply chain disruption` |
 | Employee dispute / strike | `Labor disruption (strike, labor dispute)` |
-| Customer loss / growth initiatives | `Commercial performance shift (customer loss or growth initiative)` |
+| Customer loss/growth decline | `Commercial performance shift (customer loss or growth initiative)` |
 
 Note on the labor disruption string: it intentionally contains "(strike, labor dispute)". That is
 an internal categorization value only. The backend never surfaces `trigger_type` verbatim in
@@ -145,7 +145,7 @@ value with the category string Clay actually outputs, character-for-character. D
 | `business expansion` | `Business expansion` |
 | `supply chain disruption` | `Supply chain disruption` |
 | `employee dispute/strike` | `Labor disruption (strike, labor dispute)` |
-| `customer loss/growth initiatives` | `Commercial performance shift (customer loss or growth initiative)` |
+| `Customer loss/growth decline` | `Commercial performance shift (customer loss or growth initiative)` |
 
 Clay formula shape (lookup/switch on the category output column; adjust the exact function name to
 Clay's formula syntax, keep the mapping):
@@ -157,7 +157,7 @@ switch(
   "business expansion",              "Business expansion",
   "supply chain disruption",         "Supply chain disruption",
   "employee dispute/strike",         "Labor disruption (strike, labor dispute)",
-  "customer loss/growth initiatives","Commercial performance shift (customer loss or growth initiative)"
+  "customer loss/growth decline",   "Commercial performance shift (customer loss or growth initiative)"
 )
 ```
 
